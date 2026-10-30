@@ -13,16 +13,16 @@
 
 | 架构 | 安装包 |
 | --- | --- |
-| x86_64 | `fnwb.workbuddy_1.2.7_x86.fpk` |
-| ARM64 / aarch64 | `fnwb.workbuddy_1.2.7_arm.fpk` |
+| x86_64 | `fnwb.workbuddy_1.2.8_x86.fpk` |
+| ARM64 / aarch64 | `fnwb.workbuddy_1.2.8_arm.fpk` |
 
 对照 Release 的 `SHA256SUMS` 校验文件，不一致时重新下载：
 
 ```bash
-sha256sum fnwb.workbuddy_1.2.7_x86.fpk
+sha256sum fnwb.workbuddy_1.2.8_x86.fpk
 ```
 
-应用详情显示 `v1.2`，应用内显示完整版本 `v1.2.7`。各版本更新说明见 [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) 附带的说明。
+应用详情显示 `v1.2`，应用内显示完整版本 `v1.2.8`。各版本更新说明见 [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) 附带的说明。
 
 ## 快速开始
 
@@ -48,9 +48,12 @@ sudo sh -c 'cd /vol1/1000/app_workbuddy && setsid ./start.sh > run.log 2>&1 < /d
 
 > **安全提醒**：未启用密码时，局域网 / Tailnet 内任何设备都能直接使用你的 WorkBuddy（含读写文件、消耗 AI 额度）。若 NAS 暴露到不可信网络（端口转发、公网 IP），请务必启用密码。
 
-**登录与历史**：打开后点击登录，用手机 App 扫码绑定 CodeBuddy 账号即可。绑定后对话历史随账号持久化，**跨窗口 / 设备不丢失**。该登录不依赖公网回跳，NAS 能出网即可完成。
+**登录与历史**：在**桌面 GUI**（浏览器开 `http://<NAS>:6080` 或 fnOS 远程桌面，见下）中点击登录，用手机 App 扫码绑定 CodeBuddy 账号即可。绑定后对话历史随账号持久化，**跨窗口 / 设备不丢失**。该登录不依赖公网回跳，NAS 能出网即可完成（已自测 `copilot.tencent.com` / `tencent.sso.copilot.tencent.com` 均可达）。
 
-> **关于 8090 端口的网页**：应用中心「打开」拉起的是**桌面版 WorkBuddy**（经 fnOS 远程桌面 / VNC 5900·6080），那是带聊天窗口的完整界面。安装器另在 **8090 起了一个 headless API 网关**（`start.sh` 里的 `codebuddy --serve`），它只暴露 `/api/v1/*` 端点（runs / webhooks / ACP / health / status）与 Swagger `/api/docs`。**根路径 `http://<NAS>:8090/` 显示「网页界面还没建成」占位页属预期行为，不是故障**——该网关用于 API / 自动化接入，并非给人直接聊天的 Web UI。若想用浏览器聊天界面，请走桌面版。
+> **关于 8090 与远程桌面 GUI（重要，别搞混）**：本应用有**两个独立界面**：
+> - **8090 = headless API 网关**：`start.sh` 用 `codebuddy --serve` 拉起，只暴露 `/api/v1/*` 端点（runs / webhooks / ACP / health / status）与 Swagger `/api/docs`。**根路径 `http://<NAS>:8090/` 显示「网页界面还没建成」占位页属预期行为，不是故障**，该页**没有登录 / 聊天入口**，仅用于 API / 自动化接入。
+> - **桌面 GUI（带登录 / 扫码聊天）= 远程桌面**：Electron 版 WorkBuddy 跑在 NAS 的虚拟显示（Xvfb）上，经 VNC 提供。两种访问方式：① 浏览器直接开 **`http://<NAS>:6080`**（noVNC 网页），点 **Connect** 即见完整 WorkBuddy 桌面；② 在 fnOS 应用中心打开 **「远程桌面 / 虚拟机」** 应用（trim.vm）进入会话。
+> - ⚠️ **fnOS 应用中心的「打开」按钮当前指向 8090 网关**，所以点开看到的是占位页（不是聊天界面）——这是已知现状。要聊天 / 扫码登录，请走上面的 **6080** 或 **fnOS 远程桌面**，不要被 8090 那页误导。
 
 ## 卸载
 
@@ -81,7 +84,7 @@ sudo tail -40 /vol1/1000/app_workbuddy/run.log     # 服务运行日志
 
 | | x86_64 | aarch64 |
 | --- | --- | --- |
-| 安装包 | `fnwb.workbuddy_1.2.7_x86.fpk` | `fnwb.workbuddy_1.2.7_arm.fpk` |
+| 安装包 | `fnwb.workbuddy_1.2.8_x86.fpk` | `fnwb.workbuddy_1.2.8_arm.fpk` |
 | NAS 机型 | 多数 Intel / AMD 飞牛 | 飞牛 OEC 等 ARM 机型 |
 | 解包后占用 | 约 950 MB | 约 2.7 GB |
 
@@ -109,7 +112,7 @@ cd workbuddy-fnOS-installer
 ./build.sh
 ```
 
-产物在 `dist/`：`fnwb.workbuddy_1.2.7_x86.fpk`、`fnwb.workbuddy_1.2.7_arm.fpk`、`SHA256SUMS`。`build.sh` 自动从 fnOS 官方 CDN 获取 fnpack 1.2.3。
+产物在 `dist/`：`fnwb.workbuddy_1.2.8_x86.fpk`、`fnwb.workbuddy_1.2.8_arm.fpk`、`SHA256SUMS`。`build.sh` 自动从 fnOS 官方 CDN 获取 fnpack 1.2.3。
 
 ## 合规与许可
 

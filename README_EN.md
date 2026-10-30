@@ -13,16 +13,16 @@ Download the package for your architecture from [GitHub Releases](https://github
 
 | Architecture | Package |
 | --- | --- |
-| x86_64 | `fnwb.workbuddy_1.2.4_x86.fpk` |
-| ARM64 / aarch64 | `fnwb.workbuddy_1.2.4_arm.fpk` |
+| x86_64 | `fnwb.workbuddy_1.2.8_x86.fpk` |
+| ARM64 / aarch64 | `fnwb.workbuddy_1.2.8_arm.fpk` |
 
 Verify against the `SHA256SUMS` file included in the Release; re-download if it doesn't match:
 
 ```bash
-sha256sum fnwb.workbuddy_1.2.4_x86.fpk
+sha256sum fnwb.workbuddy_1.2.8_x86.fpk
 ```
 
-The App Center shows `v1.2`; inside the app the full version `v1.2.4` is displayed. Release notes for each version are in the [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) description.
+The App Center shows `v1.2`; inside the app the full version `v1.2.8` is displayed. Release notes for each version are in the [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) description.
 
 ## Quick start
 
@@ -48,7 +48,12 @@ sudo sh -c 'cd /vol1/1000/app_workbuddy && setsid ./start.sh > run.log 2>&1 < /d
 
 > **Security note**: without a password, any device on your LAN / Tailnet can use your WorkBuddy directly (including reading/writing files and consuming your AI quota). If your NAS is exposed to an untrusted network (port forwarding, public IP), enable the password.
 
-**Login & history**: open the app, click login, and scan the QR with the mobile App to bind your CodeBuddy account. After binding, chat history persists with your account and **is not lost across windows / devices**. This login does not depend on a public-IP callback — it completes as long as the NAS has outbound access.
+> **About port 8090 vs. the Remote Desktop GUI (important — don't mix them up)**: this app has **two separate surfaces**:
+> - **8090 = headless API gateway**: `start.sh` launches `codebuddy --serve`, exposing only `/api/v1/*` endpoints (runs / webhooks / ACP / health / status) and Swagger `/api/docs`. The **root `http://<NAS>:8090/` showing "网页界面还没建成" (web UI not built yet) is expected behavior, not a failure** — that page has **no login / chat entry** and is for API / automation only.
+> - **Desktop GUI (with login / QR-chat) = Remote Desktop**: the Electron WorkBuddy runs on a virtual display (Xvfb) on the NAS and is served over VNC. Two ways to reach it: ① open **`http://<NAS>:6080`** in a browser (noVNC web UI) and click **Connect** to see the full WorkBuddy desktop; ② open the **Remote Desktop / Virtual Machine** app (trim.vm) from the fnOS App Center and enter the session.
+> - ⚠️ **The fnOS App Center "Open" button currently points at the 8090 gateway**, so what you see when you click it is the placeholder page (not the chat UI) — this is a known state. For chat / QR login, use **6080** or the **fnOS Remote Desktop** above; don't be misled by the 8090 page.
+
+**Login & history**: in the **desktop GUI** (open `http://<NAS>:6080` in a browser, or use the fnOS Remote Desktop — see above), click login and scan the QR with the mobile App to bind your CodeBuddy account. After binding, chat history persists with your account and **is not lost across windows / devices**. This login does not depend on a public-IP callback — it completes as long as the NAS has outbound access (verified: `copilot.tencent.com` / `tencent.sso.copilot.tencent.com` are reachable).
 
 ## Uninstall
 
@@ -79,7 +84,7 @@ sudo tail -40 /vol1/1000/app_workbuddy/run.log     # service runtime log
 
 | | x86_64 | aarch64 |
 | --- | --- | --- |
-| Package | `fnwb.workbuddy_1.2.4_x86.fpk` | `fnwb.workbuddy_1.2.4_arm.fpk` |
+| Package | `fnwb.workbuddy_1.2.8_x86.fpk` | `fnwb.workbuddy_1.2.8_arm.fpk` |
 | NAS models | Most Intel / AMD fnOS devices | ARM models such as fnOS OEC |
 | Unpacked size | ~950 MB | ~2.7 GB |
 
@@ -107,7 +112,7 @@ cd workbuddy-fnOS-installer
 ./build.sh
 ```
 
-Artifacts land in `dist/`: `fnwb.workbuddy_1.2.4_x86.fpk`, `fnwb.workbuddy_1.2.4_arm.fpk`, `SHA256SUMS`. `build.sh` automatically fetches fnpack 1.2.3 from fnOS's official CDN.
+Artifacts land in `dist/`: `fnwb.workbuddy_1.2.8_x86.fpk`, `fnwb.workbuddy_1.2.8_arm.fpk`, `SHA256SUMS`. `build.sh` automatically fetches fnpack 1.2.3 from fnOS's official CDN.
 
 ## Compliance & license
 

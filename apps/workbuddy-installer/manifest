@@ -1,5 +1,5 @@
 appname = fnwb.workbuddy
-version = 1.2.7
+version = 1.2.8
 display_name = WorkBuddy
 desc = WorkBuddy 的第三方安装器。安装时从官方地址获取官方 .deb 并解包为 fnOS 应用，不包含 WorkBuddy 任何二进制。本工具与 WorkBuddy 官方无隶属关系。
 platform = x86
