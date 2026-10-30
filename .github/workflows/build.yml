@@ -1,0 +1,37 @@
+name: Build fnOS fpk
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Prepare build environment
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq tar gzip coreutils sed gawk curl python3
+          # 兜底：去掉可能的 CRLF，确保 sh 能正常执行
+          sed -i 's/\r$//' build.sh make_icons.py 2>/dev/null || true
+          chmod +x build.sh
+
+      - name: Build fpk (x86 + arm)
+        run: ./build.sh
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fnwb-fpk
+          path: |
+            dist/*.fpk
+            dist/SHA256SUMS
+          if-no-files-found: warn
