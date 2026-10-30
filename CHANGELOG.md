@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.2.9 — 2026-10-31
+
+桌面 GUI 可用性修复 + 项目自查修正（含打包器加固）。
+
+### 桌面 GUI（6080 noVNC）修复
+
+以下每一项都对应一个在**无显卡 NAS**上实测到的具体故障：
+
+- **无法输入中文（已修）**：Electron 进程缺少 fcitx 所需的
+  `GTK_IM_MODULE` / `QT_IM_MODULE` / `XMODIFIERS=@im=fcitx` 与 `zh_CN.UTF-8`
+  语言环境。Electron **只在启动时**连接 XIM/DBus，进程里没有这些变量，之后
+  无论如何都切不出中文。已随包生成 `start_desktop.sh` 注入上述变量，
+  并加入 fcitx 进程保活（挂掉自动拉起）。
+- **英文全大写、无法切换（已修）**：VNC 客户端会把本机的 CapsLock 状态
+  同步到虚拟屏，并在 X server 上形成 latch（实测 `XKB indicators: Caps Lock: on`）。
+  已用 `setxkbmap -option caps:none` 彻底禁用该键，解除锁定且不会被再次同步。
+- **Connect 后黑屏（已修）**：无 GPU 环境下 Electron 窗口能映射但不绘制。
+  启动参数强制 SwiftShader 软渲染
+  （`--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader`）。
+- **点登录调不起浏览器（已修）**：裸 Xvfb 缺 `xdg-open`，
+  Electron 的 `shell.openExternal()` 静默失败。已安装 `xdg-utils`
+  并注册 http/https 默认处理器，同时注入 `BROWSER`。
+- **点 X 关闭后只剩黑屏（已修）**：新增 `while true` 自愈守护，
+  Electron 退出后 3 秒自动重启，虚拟屏上始终有内容。
+
+> 依赖顺序固定为 **Xvfb → fcitx → Electron**：Electron 启动时才连输入法，
+> 若 fcitx 尚未就绪，之后再启动 fcitx 也不会重连。
+
+### 项目自查修正
+
+- **桌面入口写入时机错误（严重）**：`_write_desktop_entry` 原先在服务启动
+  **之前**执行，但网关密码是 `start.sh` 首次运行时才写入 `ACCESS_PASS`，
+  因此读到的永远是空密码 → iframe 请求不带凭证 → **打开即黑屏**；
+  而「卸载重装 / 升级一次」后又正常，正因为第二次运行时密码文件已存在。
+  现将写入移到服务启动并确认监听之后。
+- **`.gateway_pass` 幽灵引用**：收尾输出读的是这个从不存在的旧版文件名，
+  导致永远打印「见 .gateway_pass」，用户会去找一个不存在的文件。
+  改为读真实的 `ACCESS_PASS`，并在未启用密码认证时明确说明。
+- **桌面入口 JSON 未转义密码**：用户自定义密码若含 `&` `#` 空格等字符会
+  破坏 URL 语义，表现为「密码明明对了却打不开」。新增 URL 转义。
+- **`cmd/main` 的 `stop_process` 缺兜底**：只调 `ss`，与 `port_listening()`
+  的三重兜底不一致；在 ss 返回空的机器上停不掉进程，残留进程持续占用
+  8090，下次 start 必然冲突。改用 `port_owner()` 并补 `lsof` 兜底。
+- **`cmd/main` 启动失败仍 `exit 0`**：fnOS 无法感知失败，界面一直转圈。
+  现正确回传非零退出码。
+- **`common.sh` 的 `start_service` 缺 `setsid`**：与已修复的 SIGHUP 问题同源。
+- **`install_init` 重复查询更新接口**：正常路径上多一次网络往返，且两次
+  查询之间官方若发版，会导致记录版本与实际下载的包不一致、升级判断错乱。
+- **`build.sh` 加固**：打包前统一清理 `cmd/` 下脚本的 CRLF（换机打包易踩）；
+  新增 `APP_VERSION` / `manifest version` / `install_init INSTALLER_VERSION`
+  三处版本号一致性硬校验，不一致直接中止而非仅告警。
+
 ## 1.2.8 — 2026-10-31
 
 文档更正（无功能 / 打包变更）：

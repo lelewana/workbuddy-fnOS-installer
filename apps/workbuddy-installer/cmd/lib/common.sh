@@ -118,14 +118,27 @@ require_space_mb() {
 
 # ---------------------------------------------------------------- 进程管理
 
+# 端口占用者的 PID。
+#
+# 关键：三级探测必须"逐级兜底"，不能写成 if/elif 一锤子买卖。
+# 原先的写法是 `if have_cmd ss; then ... elif have_cmd netstat; then ...`，
+# 只要系统里存在 ss，就永远不会走到 netstat 分支；而某些精简版 fnOS 上
+# ss 虽然存在，却因缺少内核特性/权限返回空，于是 pid 恒为空 ——
+# 表现为 stop 停不掉、进程一直占着 8090。
 port_owner() {
+    _p=""
     if have_cmd ss; then
-        ss -lntp 2>/dev/null | grep ":${APP_PORT}[[:space:]]" \
-            | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
-    elif have_cmd netstat; then
-        netstat -lntp 2>/dev/null | grep ":${APP_PORT}[[:space:]]" \
-            | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+        _p=$(ss -lntp 2>/dev/null | grep ":${APP_PORT}[[:space:]]" \
+             | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
     fi
+    if [ -z "$_p" ] && have_cmd netstat; then
+        _p=$(netstat -lntp 2>/dev/null | grep ":${APP_PORT}[[:space:]]" \
+             | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+    fi
+    if [ -z "$_p" ] && have_cmd lsof; then
+        _p=$(lsof -ti ":${APP_PORT}" 2>/dev/null | head -1)
+    fi
+    printf '%s' "${_p:-}"
 }
 
 is_running() {
@@ -157,7 +170,13 @@ start_service() {
     [ -f "$runner" ] || return 1
 
     chmod +x "$runner" 2>/dev/null || true
-    nohup /bin/sh "$runner" >/dev/null 2>&1 &
+    # 与 cmd/main 保持一致：必须用 setsid 脱离会话，否则进程会随调用方
+    # 会话结束被 SIGHUP 杀掉（表现为"刚启动就没了"）。缺失时退化为 nohup。
+    if have_cmd setsid; then
+        setsid nohup /bin/sh "$runner" >/dev/null 2>&1 </dev/null &
+    else
+        nohup /bin/sh "$runner" >/dev/null 2>&1 &
+    fi
 
     i=0
     while [ $i -lt 40 ]; do

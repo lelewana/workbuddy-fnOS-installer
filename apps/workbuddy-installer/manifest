@@ -1,5 +1,5 @@
 appname = fnwb.workbuddy
-version = 1.2.8
+version = 1.2.9
 display_name = WorkBuddy
 desc = WorkBuddy 的第三方安装器。安装时从官方地址获取官方 .deb 并解包为 fnOS 应用，不包含 WorkBuddy 任何二进制。本工具与 WorkBuddy 官方无隶属关系。
 platform = x86
@@ -15,4 +15,4 @@ desktop_uidir = ui
 desktop_applaunchname = fnwb.workbuddy.main
 install_type = root
 ctl_stop = true
-changelog = 文档更新：README 补 8090 headless API 网关说明（根路径占位页属预期）；修复网关启动崩溃（start.sh 漏设 CODEBUDDY_FORCE_HEADLESS_BUNDLE，codebuddy --serve 因找不到 ../dist/codebuddy 直接退出、8090 不监听、应用中心转圈；已在启动前注入该环境变量强制路由到已存在的 headless bundle）；修复 fnOS 启动后服务被 SIGHUP 杀掉导致应用中心一直转圈（运行时启动改用 setsid 彻底脱离会话，端口检测增加 netstat/proc 兜底）；修复 start.sh 内存检测：打包期变量被错误展开，导致生成脚本里总内存为空、V8 堆上限恒为 1536MB 且启动报 integer expression expected；改为多来源探测（/proc/meminfo→free -m→vmstat -s）并强制正整数兜底，OEC 2GB 机型现在真正按 768MB 限制堆；deb 落存储池而非 /tmp；空间检查跟随实际安装卷
+changelog = 修复桌面 GUI 无法输入中文：生成的 start_desktop.sh 注入 fcitx 必需的 GTK_IM_MODULE/QT_IM_MODULE/XMODIFIERS 与 zh_CN.UTF-8 语言环境（Electron 仅在启动时连接 XIM/DBus，进程缺变量则永久切不出中文），并加入输入法进程保活。修复虚拟屏英文全大写：VNC 客户端会把本机 CapsLock 状态同步到虚拟屏且形成 latch，用 setxkbmap -option caps:none 禁用该键。修复连接后黑屏：无 GPU 环境 Electron 窗口映射但不绘制，启动参数强制 SwiftShader 软渲染。修复登录调不起浏览器：裸 Xvfb 缺 xdg-open 导致 shell.openExternal 静默失败，安装 xdg-utils 并注册 http/https 默认处理器。新增进程自愈守护：点 X 关闭后自动重启，避免虚拟屏无绘制只剩黑屏。修复桌面入口写入时机错误：网关密码由 start.sh 首次运行时生成，旧版在此前写入导致读到空密码、iframe 无凭证而黑屏（重装才恢复），现改为服务启动并确认监听后再写。修复收尾输出引用从不存在的 .gateway_pass（旧版残留名），改为读真实的 ACCESS_PASS 并在未启用密码时明确说明。修复桌面入口 JSON 未转义密码：含 & # 空格等字符会破坏 URL 语义，新增 URL 转义。修复 cmd/main 的 stop_process 仅用 ss 无兜底导致停不掉、进程残留占用端口；改用 common.sh 的 port_owner 并补 lsof 兜底。修复 cmd/main 启动失败仍 exit 0，fnOS 无法感知失败。修复 common.sh 的 start_service 缺 setsid 的 SIGHUP 隐患。修复 install_init 在正常路径重复调用 resolve_official_url，多一次网络往返且可能因两次查询间官方发版导致记录版本与实际包不一致。build.sh 打包前统一清理脚本 CRLF，并新增 APP_VERSION/manifest/install_init 三处版本号一致性硬校验

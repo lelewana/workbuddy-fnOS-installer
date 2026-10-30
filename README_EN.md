@@ -13,16 +13,16 @@ Download the package for your architecture from [GitHub Releases](https://github
 
 | Architecture | Package |
 | --- | --- |
-| x86_64 | `fnwb.workbuddy_1.2.8_x86.fpk` |
-| ARM64 / aarch64 | `fnwb.workbuddy_1.2.8_arm.fpk` |
+| x86_64 | `fnwb.workbuddy_1.2.9_x86.fpk` |
+| ARM64 / aarch64 | `fnwb.workbuddy_1.2.9_arm.fpk` |
 
 Verify against the `SHA256SUMS` file included in the Release; re-download if it doesn't match:
 
 ```bash
-sha256sum fnwb.workbuddy_1.2.8_x86.fpk
+sha256sum fnwb.workbuddy_1.2.9_x86.fpk
 ```
 
-The App Center shows `v1.2`; inside the app the full version `v1.2.8` is displayed. Release notes for each version are in the [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) description.
+The App Center shows `v1.2`; inside the app the full version `v1.2.9` is displayed. Release notes for each version are in the [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) description.
 
 ## Quick start
 
@@ -52,6 +52,33 @@ sudo sh -c 'cd /vol1/1000/app_workbuddy && setsid ./start.sh > run.log 2>&1 < /d
 > - **8090 = headless API gateway**: `start.sh` launches `codebuddy --serve`, exposing only `/api/v1/*` endpoints (runs / webhooks / ACP / health / status) and Swagger `/api/docs`. The **root `http://<NAS>:8090/` showing "网页界面还没建成" (web UI not built yet) is expected behavior, not a failure** — that page has **no login / chat entry** and is for API / automation only.
 > - **Desktop GUI (with login / QR-chat) = Remote Desktop**: the Electron WorkBuddy runs on a virtual display (Xvfb) on the NAS and is served over VNC. Two ways to reach it: ① open **`http://<NAS>:6080`** in a browser (noVNC web UI) and click **Connect** to see the full WorkBuddy desktop; ② open the **Remote Desktop / Virtual Machine** app (trim.vm) from the fnOS App Center and enter the session.
 > - ⚠️ **The fnOS App Center "Open" button currently points at the 8090 gateway**, so what you see when you click it is the placeholder page (not the chat UI) — this is a known state. For chat / QR login, use **6080** or the **fnOS Remote Desktop** above; don't be misled by the 8090 page.
+
+### Desktop GUI: Chinese IME / caps / black screen / login
+
+Running the Electron desktop build on a **GPU-less NAS** needs several fixes at once,
+otherwise you get "connected but can't type Chinese", "all English is uppercase",
+"black screen after Connect", or "clicking login does nothing".
+Since 1.2.9 the installer ships `start_desktop.sh` with all of them built in:
+
+```bash
+cd /vol1/1000/app_workbuddy
+setsid nohup ./start_desktop.sh >/dev/null 2>&1 &
+```
+
+| Symptom | Root cause | Fix |
+| --- | --- | --- |
+| Can't type / switch to Chinese | Electron process lacks `GTK_IM_MODULE` / `QT_IM_MODULE` / `XMODIFIERS=@im=fcitx` and the `zh_CN.UTF-8` locale; it connects to XIM/DBus **only at startup** and never retries | Export those variables; run `fcitx -d` before each launch |
+| English all uppercase | The VNC client syncs its CapsLock state into the virtual screen, which latches it in the X server | `setxkbmap -option caps:none` to disable the key |
+| Black screen after Connect | With no GPU, Electron maps the window but never draws | Add `--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader` |
+| Login doesn't open a browser | Bare Xvfb has no `xdg-open`, so `shell.openExternal()` fails silently | Install `xdg-utils` and register default http/https handlers |
+| Black screen after closing the window | Clicking X kills Electron; nothing is left drawing on the display | `while true` supervisor auto-restarts it |
+
+> **Start order must be `Xvfb → fcitx → Electron`**: Electron binds to the IME
+> only at startup; starting fcitx afterwards will not reconnect.
+
+> **Prerequisite**: `fcitx` and `fcitx-pinyin` must be installed
+> (`apt-get install -y fcitx fcitx-pinyin`). For ibus, replace the three
+> `fcitx` occurrences with `ibus`.
 
 **Login & history**: in the **desktop GUI** (open `http://<NAS>:6080` in a browser, or use the fnOS Remote Desktop — see above), click login and scan the QR with the mobile App to bind your CodeBuddy account. After binding, chat history persists with your account and **is not lost across windows / devices**. This login does not depend on a public-IP callback — it completes as long as the NAS has outbound access (verified: `copilot.tencent.com` / `tencent.sso.copilot.tencent.com` are reachable).
 
@@ -84,7 +111,7 @@ sudo tail -40 /vol1/1000/app_workbuddy/run.log     # service runtime log
 
 | | x86_64 | aarch64 |
 | --- | --- | --- |
-| Package | `fnwb.workbuddy_1.2.8_x86.fpk` | `fnwb.workbuddy_1.2.8_arm.fpk` |
+| Package | `fnwb.workbuddy_1.2.9_x86.fpk` | `fnwb.workbuddy_1.2.9_arm.fpk` |
 | NAS models | Most Intel / AMD fnOS devices | ARM models such as fnOS OEC |
 | Unpacked size | ~950 MB | ~2.7 GB |
 
@@ -112,7 +139,7 @@ cd workbuddy-fnOS-installer
 ./build.sh
 ```
 
-Artifacts land in `dist/`: `fnwb.workbuddy_1.2.8_x86.fpk`, `fnwb.workbuddy_1.2.8_arm.fpk`, `SHA256SUMS`. `build.sh` automatically fetches fnpack 1.2.3 from fnOS's official CDN.
+Artifacts land in `dist/`: `fnwb.workbuddy_1.2.9_x86.fpk`, `fnwb.workbuddy_1.2.9_arm.fpk`, `SHA256SUMS`. `build.sh` automatically fetches fnpack 1.2.3 from fnOS's official CDN.
 
 ## Compliance & license
 

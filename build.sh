@@ -31,7 +31,7 @@ HOSTARCH_darwin_x64="darwin-amd64"
 HOSTARCH_linux_x64="linux-amd64"
 
 APP_NAME="fnwb.workbuddy"
-APP_VERSION="1.2.8"
+APP_VERSION="1.2.9"
 
 if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     C_GRN='\033[0;32m'; C_YEL='\033[0;33m'; C_BLU='\033[0;34m'; C_RST='\033[0m'
@@ -53,6 +53,30 @@ done
 
 [ -d "$APP_SRC" ] || die "应用目录不存在：$APP_SRC"
 [ -f "$APP_SRC/manifest" ] || die "缺少 manifest"
+[ -f "$APP_SRC/cmd/install_init" ] || die "缺少 cmd/install_init"
+
+# ---------------------------------------------------------------- 版本一致性
+#
+# 版本号散落在三处：本文件的 APP_VERSION、manifest 的 version、
+# install_init 的 INSTALLER_VERSION。只要漏改一处，就会出现
+# 「装了新包但脚本判断无需刷新、旧缺陷脚本原样保留」这类极难排查的问题。
+# 故在打包前硬校验，不一致直接中止，而不是打个 warn 继续走。
+MANIFEST_VER=$(sed -n 's/^version[[:space:]]*=[[:space:]]*//p' "$APP_SRC/manifest" \
+               | head -1 | tr -d '[:space:]')
+[ -n "$MANIFEST_VER" ] || die "manifest 中未找到 version 字段"
+if [ "$MANIFEST_VER" != "$APP_VERSION" ]; then
+    die "版本号不一致：build.sh APP_VERSION=${APP_VERSION}，manifest version=${MANIFEST_VER}
+请同步修改 build.sh 的 APP_VERSION 与 apps/workbuddy-installer/manifest 的 version。"
+fi
+
+INIT_VER=$(sed -n 's/^INSTALLER_VERSION="\(.*\)"$/\1/p' "$APP_SRC/cmd/install_init" \
+           | head -1 | tr -d '[:space:]')
+if [ -n "$INIT_VER" ] && [ "$INIT_VER" != "$APP_VERSION" ]; then
+    die "版本号不一致：cmd/install_init INSTALLER_VERSION=${INIT_VER}，build.sh APP_VERSION=${APP_VERSION}
+请同步修改 apps/workbuddy-installer/cmd/install_init 的 INSTALLER_VERSION。"
+fi
+
+ok "版本一致性校验通过：${APP_VERSION}"
 
 # ---------------------------------------------------------------- 图标
 
@@ -146,6 +170,31 @@ for PLAT in $PLATFORMS; do
     mkdir -p "$WORK/${APP_NAME}"
 
     cp -r "$APP_SRC/." "$WORK/${APP_NAME}/"
+
+    # 行尾规范化：统一去掉 CRLF。
+    #
+    # 在 Windows 上编辑过的 shell 脚本会带上 CRLF。本仓库目前靠
+    # core.autocrlf=true 侥幸让入库内容是 LF，但换一台 autocrlf=false
+    # 的机器、或直接拿工作区打包，就会把 CRLF 一起打进 fpk。
+    # 到 NAS 上的后果相当隐蔽，排查成本极高：
+    #   - `#!/bin/bash\r`   → bad interpreter，脚本根本起不来
+    #   - 普通赋值行尾的 \r 会被当成命令名 → 刷屏 "command not found"，
+    #     且该行变成「临时环境赋值」，变量压根没写进当前 shell
+    #   - heredoc 生成的 start.sh 里 `--port 8090\r` → 端口参数被污染
+    # 故在打包前统一清理，且只在确实含有 CR 时才回写。
+    _cr_fixed=""
+    for f in "$WORK/${APP_NAME}"/cmd/main "$WORK/${APP_NAME}"/cmd/install_init \
+             "$WORK/${APP_NAME}"/cmd/lib/common.sh \
+             "$WORK/${APP_NAME}"/cmd/*_init "$WORK/${APP_NAME}"/cmd/*_callback; do
+        [ -f "$f" ] || continue
+        if tr -dc '\r' <"$f" | od -An -tx1 -v | tr -d ' \n' | grep -q .; then
+            sed -i.tmp 's/\r$//' "$f" && rm -f "$f.tmp"
+            _cr_fixed="$_cr_fixed $(basename "$f")"
+        fi
+    done
+    if [ -n "$_cr_fixed" ]; then
+        warn "已清理 CRLF 行尾：$_cr_fixed"
+    fi
 
     # 按平台改写 manifest 的 platform 字段（fnpack 依此决定产物后缀）
     sed -i.bak "s/^platform *=.*/platform = ${PLAT}/" "$WORK/${APP_NAME}/manifest"

@@ -130,7 +130,12 @@ CUR_INSTALLED=$(installed_version || true)
 
 # 安装器（fpk）自身版本：由 build.sh 用 APP_VERSION 注入此字面量。
 # 用于判断“仅升级了安装器、WorkBuddy 本体版本未变”时是否仍需刷新启动脚本。
-INSTALLER_VERSION="1.2.4"
+#
+# 注意：此处的字面量必须与 build.sh 的 APP_VERSION、manifest 的 version
+# 三者一致。build.sh 打包时会用 sed 覆盖为本轮 APP_VERSION，并在覆盖失败时
+# 直接报错中止——否则会静默打出一个“版本号滞后”的包，其表现是：
+# 用户装了新版 fpk，却因为版本号没变而判定“无需刷新”，旧缺陷脚本原样保留。
+INSTALLER_VERSION="1.2.9"
 CUR_INSTALLER=$(cat "$APP_DATA/.installer_version" 2>/dev/null | tr -d '[:space:]')
 
 # 标记：跳过本体下载时，是否仍需刷新启动脚本（安装器版本变化时才置 1）
@@ -188,13 +193,26 @@ else
             return 0
         fi
 
-        # 组装候选地址列表：用户指定优先，其次官方接口
+        # 组装候选地址列表：用户指定优先，其次复用安装开头已查到的官方地址。
+        #
+        # 此处刻意不在正常路径上再调一次 resolve_official_url：
+        #   a) 开头已经查过一次，重复请求白白多一次网络往返；
+        #   b) 更要紧的是，若两次查询之间官方恰好发了新版，会出现
+        #      「记录进 .installed_version 的版本」与「实际下载的包」
+        #      不是同一个，之后的升级判断从此错乱。
         URLS=""
         if [ -n "$DEB_URL" ]; then
             URLS="$DEB_URL"
-        else
+        fi
+        if [ -z "$URLS" ] && [ -n "${OFFICIAL_URL:-}" ]; then
+            info "使用官方接口地址：${OFFICIAL_VERSION:-未知}"
+            log "官方地址: $OFFICIAL_URL"
+            URLS="$OFFICIAL_URL"
+        fi
+        if [ -z "$URLS" ]; then
+            # 走到这里说明开头那次查询没成功（例如当时网络不通），再试一次
             if resolve_official_url; then
-                info "官方接口返回版本：${OFFICIAL_VERSION:-未知}"
+                VERSION="${OFFICIAL_VERSION:-$VERSION}"
                 log "官方地址: $OFFICIAL_URL"
                 URLS="$OFFICIAL_URL"
             else
@@ -487,6 +505,96 @@ EOS
     # --- 供 fnOS main start 调用的入口 ---
     ln -sf start.sh "$_dir/run.sh" 2>/dev/null || true
 
+    # --- 生成桌面 GUI 守护脚本（可选功能）---
+    #
+    # 背景：本安装器默认只跑 headless 网关（8090），那个根路径只有一个
+    # 占位页，**没有登录入口、也没有图形界面**。
+    # 想真正使用 WorkBuddy（扫码登录、中文输入）必须跑 Electron 桌面程序，
+    # 这就需要额外一条 Xvfb + VNC 链路：
+    #
+    #   Xvfb :99 → Electron workbuddy → x11vnc(:99,5900) → websockify(6080)
+    #   浏览器打开 http://<NAS>:6080
+    #
+    # 虚拟屏和网页 VNC 通常由 fnOS 的「远程桌面」app 提供，
+    # 本脚本只负责拉起 Electron 主进程并保活。
+    #
+    # 下面每个启动参数/环境变量都对应一个在无显卡 NAS 上实测到的具体故障，
+    # 注释里写明了「缺了会怎样」，改动前请先看注释。
+    cat >"$_dir/start_desktop.sh" <<EOD
+#!/bin/bash
+# WorkBuddy 桌面 GUI 守护脚本（由第三方安装器生成，非官方文件）
+#
+# 用法（:99 虚拟屏需先存在）：
+#   setsid nohup ./start_desktop.sh >/dev/null 2>&1 &
+
+# ---------------------------------------------------------------------------
+# 1) 中文输入法（fcitx）
+#
+#    这三个变量 + zh_CN 语言环境，是 fcitx 在 Electron 里生效的必要条件。
+#    Electron 只在**启动时**去连 XIM/DBus，进程里没有这些变量的话，
+#    之后无论如何都切不出中文 —— 表现为「能打字但只有英文」。
+#    同理，若 fcitx 当时没在跑，Electron 也不会重连，
+#    所以下方 ensure_ime 会在每次重启前先把输入法拉起来。
+#    用 ibus 的话把三个 fcitx 换成 ibus 即可。
+# ---------------------------------------------------------------------------
+export DISPLAY="\${DISPLAY:-:99}"
+export XDG_RUNTIME_DIR="/run/user/\$(id -u)"
+export GTK_IM_MODULE=fcitx
+export QT_IM_MODULE=fcitx
+export XMODIFIERS="@im=fcitx"
+export LANG=zh_CN.UTF-8
+export LC_ALL=zh_CN.UTF-8
+export LANGUAGE=zh_CN:zh
+
+# ---------------------------------------------------------------------------
+# 2) 登录时拉起浏览器
+#
+#    裸 Xvfb 环境里没有 xdg-open，Electron 的 shell.openExternal()
+#    会**静默失败** —— 点了「登录」什么反应都没有，很容易误判为程序卡死。
+#    需先装 xdg-utils 并注册默认浏览器：
+#       apt-get install -y xdg-utils
+#       xdg-mime default firefox-esr.desktop x-scheme-handler/http
+#       xdg-mime default firefox-esr.desktop x-scheme-handler/https
+#    下面的 BROWSER 供走 \$BROWSER 的程序兜底，改成你实际的浏览器路径。
+# ---------------------------------------------------------------------------
+export BROWSER=/usr/bin/firefox
+
+APPDIR="$_appdir"
+
+# 输入法保活：fcitx 没在跑就重新拉起
+ensure_ime() {
+    command -v fcitx >/dev/null 2>&1 || return 0
+    pgrep -x fcitx >/dev/null 2>&1 || fcitx -d 2>/dev/null
+}
+
+ensure_ime
+
+# ---------------------------------------------------------------------------
+# 3) 自愈循环
+#
+#    点标题栏的 X 会直接结束 Electron 进程，此后 :99 上没有任何程序在绘制，
+#    VNC 连上就是一片黑，而用户往往以为「软件崩了」。
+#    这里在进程退出后自动重启，虚拟屏上始终有内容。
+#    （需要真正退出时，先 kill 掉本守护脚本，再 kill workbuddy）
+# ---------------------------------------------------------------------------
+while true; do
+    # -----------------------------------------------------------------------
+    # 4) 软件渲染
+    #
+    #    无 GPU 的机器上 Electron 窗口能映射但不绘制，VNC 看到的就是纯黑。
+    #    必须强制 SwiftShader，否则「连得上却什么都看不见」。
+    # -----------------------------------------------------------------------
+    "\$APPDIR/workbuddy" --no-sandbox --disable-dev-shm-usage \\
+        --enable-unsafe-swiftshader \\
+        --use-gl=angle --use-angle=swiftshader \\
+        >>/tmp/wb_desktop.log 2>&1
+    echo "[守护] workbuddy 退出于 \$(date)，3 秒后重启" >>/tmp/wb_desktop.log
+    ensure_ime
+    sleep 3
+done
+EOD
+    chmod +x "$_dir/start_desktop.sh" || return 1
+
     log "已生成启动脚本"
     hint "CLI 入口：$_appdir"
     return 0
@@ -515,10 +623,31 @@ _ensure_auth_files() {
     return 0
 }
 
+# URL 查询参数转义
+#
+# 生成的随机密码只含字母数字，本来不会出问题；但 ACCESS_PASS 允许用户
+# 自行写入任意字符串，一旦含 & # + % 或空格，拼进 url 后要么被当成
+# 新的查询参数、要么被截断，表现为「密码明明对了却打不开」。
+# 只转义非安全字符，A-Za-z0-9 与 . _ ~ - 原样保留。
+_url_escape() {
+    _s="$1"
+    _out=""
+    _i=1
+    while [ "$_i" -le "${#_s}" ]; do
+        _c=$(printf '%s' "$_s" | cut -c "$_i")
+        case "$_c" in
+            [A-Za-z0-9._~-]) _out="${_out}${_c}" ;;
+            *)               _out="${_out}$(printf '%%%02X' "'$_c")" ;;
+        esac
+        _i=$((_i + 1))
+    done
+    printf '%s' "$_out"
+}
+
 # 写入 fnOS 桌面入口配置
 #
 # 关键点：网关开启了密码认证，iframe 请求若不带凭证会返回空白页/黑屏。
-# 因此 url 必须带上 ?password=<网关密码>。
+# 因此 url 必须带上 ?password=<网关密码>（密码需先做 URL 转义）。
 #
 # 路径说明（fnOS 实测）：
 #   fpk 内是 app/ui/config，但 fnOS 应用中心解包 app.tgz 后，
@@ -532,24 +661,29 @@ _write_desktop_entry() {
     if [ "$(cat "$_datadir/AUTH_MODE" 2>/dev/null || echo none)" != "password" ]; then
         _pw=""
     else
-        _pw=$(cat "$_datadir/ACCESS_PASS" 2>/dev/null || echo "")
+        _pw=$(_url_escape "$(cat "$_datadir/ACCESS_PASS" 2>/dev/null || echo "")")
     fi
 
     # 候选位置：应用注册目录优先（fnOS 实际读取处），其次旧结构
-    _cands="
-$APP_DIR/ui/config
+    #
+    # 用换行分隔的字符串 + while read 遍历，而不是 `for c in $_cands`：
+    # 后者不做引号保护，一旦路径里含空格（例如用户把数据目录放在
+    # 带空格的卷名下）就会被拆成多个词，探测到根本不存在的路径。
+    _cands="$APP_DIR/ui/config
 $APP_DIR/app/ui/config
 $_datadir/app/ui/config
-$_datadir/ui/config
-"
+$_datadir/ui/config"
 
     _target=""
-    for c in $_cands; do
+    while IFS= read -r c; do
+        [ -n "$c" ] || continue
         if [ -d "$(dirname "$c")" ]; then
             _target="$c"
             break
         fi
-    done
+    done <<EOF
+$_cands
+EOF
 
     # 都没找到时，在应用注册目录下创建 ui/（首次安装可能如此）
     if [ -z "$_target" ] && [ -d "$APP_DIR" ]; then
@@ -648,18 +782,6 @@ fi
 # 供下次升级判断“安装器是否变化”，见上方 INSTALL_SKIP 分支与刷新逻辑。
 printf '%s\n' "${INSTALLER_VERSION:-unknown}" >"$APP_DATA/.installer_version" 2>/dev/null || true
 
-# ---------------------------------------------------------------- 桌面入口
-#
-# 无论本次是全新安装、升级还是"已是最新版本跳过"，都要确保
-# 桌面入口的 url 带着正确的网关密码 —— 这是黑屏的根因所在。
-# 放在此处可覆盖所有分支。
-if [ -f "$APP_DATA/.gateway_pass" ] || [ -f "$APP_DATA/start.sh" ]; then
-    step "配置桌面入口"
-    _ensure_auth_files "$APP_DATA"
-    _write_desktop_entry "$APP_DATA" \
-        || warn "桌面入口配置未更新；若打开是黑屏，请手动把应用设置中的 url 改为 /?password=<密码>"
-fi
-
 # ---------------------------------------------------------------- 拉起服务
 #
 # 注意两个实测得出的关键点：
@@ -686,46 +808,93 @@ if is_running; then
     fi
 fi
 
-# setsid + nohup：脱离当前会话，避免被父进程退出时的信号带走
-if setsid nohup "$APP_DATA/start.sh" >"$APP_DATA/run.log" 2>&1 </dev/null &
-then
-    # 给它时间起来
+# setsid + nohup：脱离当前会话，避免被父进程退出时的信号带走。
+#
+# 坑：不能写成 `if setsid ... & then ... fi`。
+#     异步命令（以 & 结尾）的退出状态恒为 0，那样写的话即使 start.sh
+#     不存在、setsid 拉起失败，也会走进“成功”分支，静默吞掉启动失败。
+if [ -x "$APP_DATA/start.sh" ] || [ -f "$APP_DATA/start.sh" ]; then
+    setsid nohup "$APP_DATA/start.sh" >"$APP_DATA/run.log" 2>&1 </dev/null &
+    LAUNCH_OK=1
+else
+    err "启动脚本不存在或不可执行：$APP_DATA/start.sh"
+    LAUNCH_OK=0
+fi
+
+SVC_UP=0
+if [ "$LAUNCH_OK" = "1" ]; then
+    # 等待端口就绪，最多 40 秒
     i=0
     while [ $i -lt 40 ]; do
-        if is_running; then break; fi
+        if is_running; then SVC_UP=1; break; fi
         sleep 1
         i=$((i + 1))
     done
+fi
 
-    # 校验监听者确实是本实例
-    pid=$(port_owner)
-    if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
-        cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)
-    else
-        cmdline=""
-    fi
-    if echo "$cmdline" | grep -q "$APP_DATA"; then
-        ok "WorkBuddy 已运行：端口 ${APP_PORT}（PID $pid）"
-        log "=== 安装成功 ==="
-    elif [ -n "$pid" ]; then
-        warn "端口 ${APP_PORT} 被其它进程占用（PID $pid），本实例未能启动"
-        warn "查看日志：tail -20 $APP_DATA/run.log"
-        log "=== 安装完成（服务冲突）==="
-    else
-        warn "服务已拉起但端口 ${APP_PORT} 尚未监听"
-        log "查看日志：tail -20 $APP_DATA/run.log"
-        log "=== 安装完成（服务待检查）==="
-    fi
+# 校验监听者确实是本实例
+pid=$(port_owner)
+if [ -n "$pid" ] && [ -r "/proc/$pid/cmdline" ]; then
+    cmdline=$(tr '\0' ' ' <"/proc/$pid/cmdline" 2>/dev/null || true)
 else
-    warn "启动失败"
-    log "查看日志：tail -20 $APP_DATA/run.log"
+    cmdline=""
+fi
+
+if [ "$SVC_UP" = "1" ] && echo "$cmdline" | grep -q "$APP_DATA"; then
+    ok "WorkBuddy 已运行：端口 ${APP_PORT}（PID $pid）"
+    log "=== 安装成功 ==="
+elif [ -n "$pid" ]; then
+    warn "端口 ${APP_PORT} 被其它进程占用（PID $pid），本实例未能启动"
+    warn "查看日志：tail -20 $APP_DATA/run.log"
+    log "=== 安装完成（服务冲突）==="
+else
+    warn "服务已拉起但端口 ${APP_PORT} 尚未监听"
+    warn "查看日志：tail -20 $APP_DATA/run.log"
+    log "=== 安装完成（服务待检查）==="
+fi
+
+# ---------------------------------------------------------------- 桌面入口
+#
+# 必须放在服务启动**之后**，这是关键的顺序修复：
+#
+#   网关密码由 start.sh 首次运行时生成并写入 ACCESS_PASS，
+#   因此刚解包完还没启动时，这个文件是不存在的。
+#   旧版本在这里之前就写桌面入口，读到的永远是空密码，
+#   于是 iframe 请求不带凭证 → 打开发现一片黑；
+#   而用户“卸载重装”或“升个级”之后又正常了，
+#   正是因为第二次运行时 ACCESS_PASS 已经存在。
+#
+# 放在此处可同时覆盖三种情形：全新安装 / 升级 / “已是最新跳过下载”。
+if [ -f "$APP_DATA/start.sh" ]; then
+    step "配置桌面入口"
+    _ensure_auth_files "$APP_DATA"
+    _write_desktop_entry "$APP_DATA" \
+        || warn "桌面入口配置未更新；若打开是黑屏，请手动把应用设置中的 url 改为 /?password=<密码>"
+fi
+
+# ---------------------------------------------------------------- 收尾输出
+#
+# 旧版本这里读的是 .gateway_pass —— 那是更早版本留下的名字，
+# 本脚本从来不会创建它，所以那行永远输出“见 .gateway_pass”，
+# 用户照着去找一个不存在的文件。改为读真正的密码文件 ACCESS_PASS，
+# 并在未启用密码认证时明确说明，避免误导。
+
+_gw_pass=""
+if [ "$(cat "$APP_DATA/AUTH_MODE" 2>/dev/null || echo none)" = "password" ]; then
+    _gw_pass=$(cat "$APP_DATA/ACCESS_PASS" 2>/dev/null || echo "")
+fi
+
+if [ -n "$_gw_pass" ]; then
+    _pw_text="$_gw_pass"
+    _pw_hint="  密码是唯一防护，请勿泄露。"
+else
+    _pw_text="未启用（打开即用）"
+    _pw_hint="  需要密码时执行：echo password > $APP_DATA/AUTH_MODE 后重启应用"
 fi
 
 log "安装目录: $APP_DATA"
 log "访问地址: http://<NAS地址>:${APP_PORT}"
-log "网关密码: $(cat "$APP_DATA/.gateway_pass" 2>/dev/null || echo '(见 .gateway_pass)')"
-
-# ---------------------------------------------------------------- 收尾
+log "网关密码: $_pw_text"
 
 cat <<EOF
 
@@ -733,11 +902,22 @@ $(ok "WorkBuddy 安装完成")
 
   访问地址：http://<你的NAS地址>:${APP_PORT}
   程序目录：$APP_DATA
-  访问密码：$(cat "$APP_DATA/.gateway_pass" 2>/dev/null || echo '见 .gateway_pass')
+  访问密码：$_pw_text
 
-  桌面图标已自动配置好密码，直接点击即可访问。
+  桌面图标已自动配置好访问方式，直接点击即可。
   端口 ${APP_PORT} 对局域网 / Tailnet 内所有设备开放，
-  密码是唯一防护，请勿泄露。
+$_pw_hint
+
+  关于图形界面（重要）：
+  ${APP_PORT} 端口是 headless API 网关，根路径只有一个占位页，
+  **没有登录入口、也没有图形界面**，这是预期行为。
+  要使用完整的桌面 GUI（扫码登录、中文输入），请：
+    1. 用 fnOS 应用中心的「远程桌面」app，打开
+       http://<NAS地址>:6080 连接虚拟屏：99；
+    2. 或自行部署 Xvfb + x11vnc + websockify(noVNC)。
+  已随包生成 $APP_DATA/start_desktop.sh，内含无显卡环境下
+  必需的软渲染参数、fcitx 中文输入法环境变量与进程守护，
+  直接运行即可拉起图形界面。
 
 EOF
 

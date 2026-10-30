@@ -13,16 +13,16 @@
 
 | 架构 | 安装包 |
 | --- | --- |
-| x86_64 | `fnwb.workbuddy_1.2.8_x86.fpk` |
-| ARM64 / aarch64 | `fnwb.workbuddy_1.2.8_arm.fpk` |
+| x86_64 | `fnwb.workbuddy_1.2.9_x86.fpk` |
+| ARM64 / aarch64 | `fnwb.workbuddy_1.2.9_arm.fpk` |
 
 对照 Release 的 `SHA256SUMS` 校验文件，不一致时重新下载：
 
 ```bash
-sha256sum fnwb.workbuddy_1.2.8_x86.fpk
+sha256sum fnwb.workbuddy_1.2.9_x86.fpk
 ```
 
-应用详情显示 `v1.2`，应用内显示完整版本 `v1.2.8`。各版本更新说明见 [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) 附带的说明。
+应用详情显示 `v1.2`，应用内显示完整版本 `v1.2.9`。各版本更新说明见 [GitHub Releases](https://github.com/mclhm8182/workbuddy-fnOS-installer/releases/latest) 附带的说明。
 
 ## 快速开始
 
@@ -55,6 +55,31 @@ sudo sh -c 'cd /vol1/1000/app_workbuddy && setsid ./start.sh > run.log 2>&1 < /d
 > - **桌面 GUI（带登录 / 扫码聊天）= 远程桌面**：Electron 版 WorkBuddy 跑在 NAS 的虚拟显示（Xvfb）上，经 VNC 提供。两种访问方式：① 浏览器直接开 **`http://<NAS>:6080`**（noVNC 网页），点 **Connect** 即见完整 WorkBuddy 桌面；② 在 fnOS 应用中心打开 **「远程桌面 / 虚拟机」** 应用（trim.vm）进入会话。
 > - ⚠️ **fnOS 应用中心的「打开」按钮当前指向 8090 网关**，所以点开看到的是占位页（不是聊天界面）——这是已知现状。要聊天 / 扫码登录，请走上面的 **6080** 或 **fnOS 远程桌面**，不要被 8090 那页误导。
 
+### 桌面 GUI：中文输入法 / 大写 / 黑屏 / 登录
+
+无显卡的 NAS 上跑 Electron 桌面版，有几个坑必须同时处理，否则会表现为
+「能连上但打不出中文」「英文全是大写」「连上黑屏」「点登录没反应」。
+1.2.9 起安装器会随包生成 `start_desktop.sh`，这些已全部内置：
+
+```bash
+cd /vol1/1000/app_workbuddy
+setsid nohup ./start_desktop.sh >/dev/null 2>&1 &
+```
+
+| 现象 | 根因 | 处理 |
+| --- | --- | --- |
+| 打不出中文、切换无效 | Electron 进程缺 `GTK_IM_MODULE` / `QT_IM_MODULE` / `XMODIFIERS=@im=fcitx` 与 `zh_CN.UTF-8`；它只在**启动时**连 XIM/DBus，之后不重连 | 注入上述环境变量，并在每次拉起前 `fcitx -d` 保活 |
+| 英文全大写、切不回来 | VNC 客户端把本机 CapsLock 同步到虚拟屏，并在 X server 上形成 latch | `setxkbmap -option caps:none` 禁用该键 |
+| Connect 后黑屏 | 无 GPU 时 Electron 窗口能映射但不绘制 | 启动参数加 `--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader` |
+| 点登录不弹浏览器 | 裸 Xvfb 无 `xdg-open`，`shell.openExternal()` 静默失败 | 装 `xdg-utils` 并注册 http/https 默认处理器 |
+| 关掉窗口后黑屏 | 点 X 结束了 Electron，虚拟屏上无程序绘制 | `while true` 守护，退出后自动重启 |
+
+> **启动顺序固定为 `Xvfb → fcitx → Electron`**：Electron 只在启动时连接输入法，
+> 若此时 fcitx 未就绪，之后再启动也连不上。
+
+> **输入法前提**：需已安装 `fcitx` 与 `fcitx-pinyin`（`apt-get install -y fcitx fcitx-pinyin`）。
+> 若用的是 ibus，把脚本里的三个 `fcitx` 换成 `ibus` 即可。
+
 ## 卸载
 
 在应用中心直接卸载即可 —— 默认保留程序数据（`/vol1/1000/app_workbuddy`），便于重新启用。彻底清理（不可逆）：
@@ -84,7 +109,7 @@ sudo tail -40 /vol1/1000/app_workbuddy/run.log     # 服务运行日志
 
 | | x86_64 | aarch64 |
 | --- | --- | --- |
-| 安装包 | `fnwb.workbuddy_1.2.8_x86.fpk` | `fnwb.workbuddy_1.2.8_arm.fpk` |
+| 安装包 | `fnwb.workbuddy_1.2.9_x86.fpk` | `fnwb.workbuddy_1.2.9_arm.fpk` |
 | NAS 机型 | 多数 Intel / AMD 飞牛 | 飞牛 OEC 等 ARM 机型 |
 | 解包后占用 | 约 950 MB | 约 2.7 GB |
 
@@ -112,7 +137,7 @@ cd workbuddy-fnOS-installer
 ./build.sh
 ```
 
-产物在 `dist/`：`fnwb.workbuddy_1.2.8_x86.fpk`、`fnwb.workbuddy_1.2.8_arm.fpk`、`SHA256SUMS`。`build.sh` 自动从 fnOS 官方 CDN 获取 fnpack 1.2.3。
+产物在 `dist/`：`fnwb.workbuddy_1.2.9_x86.fpk`、`fnwb.workbuddy_1.2.9_arm.fpk`、`SHA256SUMS`。`build.sh` 自动从 fnOS 官方 CDN 获取 fnpack 1.2.3。
 
 ## 合规与许可
 

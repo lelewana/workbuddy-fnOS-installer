@@ -95,9 +95,13 @@ start_process() {
 stop_process() {
     log_msg "Stopping WorkBuddy"
 
-    # 优先按端口停止
-    pid=$(ss -lntp 2>/dev/null | grep ":${APP_PORT}[[:space:]]" \
-          | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2)
+    # 优先按端口停止。
+    #
+    # 注意：这里必须走 common.sh 的 port_owner()，不能图省事直接调 ss。
+    # port_owner() 内置 ss → netstat → lsof 逐级兜底；直接调 ss 的话，
+    # 在没有 ss 或 ss 返回空的机器上 pid 恒为空，stop 就成了空转 ——
+    # 进程继续占着 8090，下次 start 必然端口冲突，应用中心一直转圈。
+    pid=$(port_owner)
     [ -n "$pid" ] || pid=$(cat "$PID_FILE" 2>/dev/null | tr -d '[:space:]')
 
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
@@ -130,16 +134,19 @@ status() {
 
 case "${1:-}" in
     start)
-        start_process
+        # 启动失败必须把非零退出码交还给 fnOS，否则应用中心会认为
+        # "启动成功"，然后卡在一个永远等不到服务的界面上转圈。
+        start_process || exit 1
         ;;
     stop)
-        stop_process
+        stop_process || exit 1
         ;;
     status)
         status
         exit $?
         ;;
     *)
+        err "用法：$0 {start|stop|status}"
         exit 1
         ;;
 esac
