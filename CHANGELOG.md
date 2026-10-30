@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.6 — 2026-10-31
+
+修复网关启动崩溃导致应用中心一直转圈（与 1.2.5 的 SIGHUP 修复是**不同根因**）。
+
+### 根因
+`start.sh` 用 `codebuddy --serve --host 0.0.0.0 --port 8090` 拉起网关，但未设置
+`CODEBUDDY_FORCE_HEADLESS_BUNDLE` / `CODEBUDDY_FORCE_LITE_WB_BUNDLE`。codebuddy 启动器
+对 `--serve` 不会自动判定为 headless，默认走 `require('../dist/codebuddy')`；而 WorkBuddy
+5.6.x 包只发 `codebuddy-headless.js` / `codebuddy-lite-wb.mjs`、缺完整包，于是网关启动即
+退出、8090 永不监听、应用中心持续转圈（run.log 报 `Cannot find module '../dist/codebuddy'`）。
+
+### 1.2.6 改动
+- `install_init` 生成的 `start.sh` 在 `exec codebuddy` 前注入 `export CODEBUDDY_FORCE_HEADLESS_BUNDLE=1`，
+  强制路由到已存在的 headless bundle，网关正常监听 8090。
+- 已在 NAS 实测：加该变量后 `codebuddy --serve` 成功绑定 8090 并输出 HTTP Server 端点，`curl` 返回 200。
+
+> 升级即生效：安装器记录自身版本，升级时若安装器版本变化会自动刷新 `start.sh`，
+> 即使 WorkBuddy 本体版本不变。直接升级即可，无需卸载。
+
 ## 1.2.4 — 2026-10-10
 
 移除 1.2.3 误注入的 `CODEBUDDY_BASE_URL` 逻辑，纠正对登录机制的误解，并澄清「跨窗口历史丢失」的真实根因与解法。

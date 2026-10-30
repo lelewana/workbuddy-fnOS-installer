@@ -459,6 +459,12 @@ fi
 export NODE_OPTIONS="--max-old-space-size=\$HEAP_MB"
 echo "WorkBuddy: 机器内存 \${_total}MB，V8 堆上限 \${HEAP_MB}MB"
 
+# 关键修复：codebuddy 启动器默认分支会 require('../dist/codebuddy')，而 WorkBuddy 5.6.x
+# 包只发 codebuddy-headless.js / codebuddy-lite-wb.mjs，缺完整包会导致 --serve 网关
+# 启动即崩溃、8090 永不监听、应用中心一直转圈。设置该环境变量强制路由到已存在的
+# headless bundle（启动器源码注释亦要求宿主在 spawn 前设置此变量）。
+export CODEBUDDY_FORCE_HEADLESS_BUNDLE=1
+
 exec "\$APPDIR/resources/app.asar.unpacked/cli/bin/codebuddy" \\
     --serve --host 0.0.0.0 --port ${APP_PORT}
 EOS
