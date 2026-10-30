@@ -3,10 +3,11 @@ name: Build fnOS fpk
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch: {}
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -35,3 +36,15 @@ jobs:
             dist/*.fpk
             dist/SHA256SUMS
           if-no-files-found: warn
+
+      - name: Create GitHub Release (on tag)
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME}"
+          gh release create "$VERSION" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$VERSION" \
+            --notes "fnOS 安装包（x86 + arm 双架构）。安装时从官方地址获取 WorkBuddy 本体，本仓库不包含任何二进制；与 WorkBuddy 官方无隶属关系。" \
+            dist/*.fpk dist/SHA256SUMS
